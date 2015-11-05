@@ -352,4 +352,245 @@ void Application::readTest() {
 	}
 	
 	/** end of test 2 **/
+	/**
+	 * Test 3 part 1: Fail two replicas. Test if value is read correctly in quorum number of nodes after TWO OF THE REPLICAS ARE FAILED
+	 */
+	// Wait for STABILIZE_TIME and fail two replicas
+	if ( par->getcurrtime() >= (TEST_TIME + FIRST_FAIL_TIME + STABILIZE_TIME) ) {
+		vector<int> nodesToFail;
+		nodesToFail.clear();
+		int count = 0;
+
+		if ( par->getcurrtime() == (TEST_TIME + FIRST_FAIL_TIME + STABILIZE_TIME) ) {
+			// Step 3.a. Find a node that is alive
+			number = findARandomNodeThatIsAlive();
+
+			// Get the keys replicas
+			replicas.clear();
+			replicas = mp2[number]->findNodes(it->first);
+
+			// Step 3.b. Fail two replicas
+			//cout<<"REPLICAS SIZE: "<<replicas.size();
+			if ( replicas.size() > 2 ) {
+				replicaIdToFail = TERTIARY;
+				while ( count != 2 ) {
+					int i = 0;
+					while ( i != par->EN_GPSZ ) {
+						if ( mp2[i]->getMemberNode()->addr.getAddress() == replicas.at(replicaIdToFail).getAddress()->getAddress() ) {
+							if ( !mp2[i]->getMemberNode()->bFailed ) {
+								nodesToFail.emplace_back(i);
+								replicaIdToFail--;
+								count++;
+								break;
+							}
+							else {
+								// Since we fail at most two nodes, one of the replicas must be alive
+								if ( replicaIdToFail > 0 ) {
+									replicaIdToFail--;
+								}
+							}
+						}
+						i++;
+					}
+				}
+			}
+			else {
+				// If the code reaches here. Test your stabilization protocol
+				cout<<endl<<"Not enough replicas to fail two nodes. Number of replicas of this key: " <<replicas.size() <<". Exiting test case !! "<<endl;
+				exit(1);
+			}
+			if ( count == 2 ) {
+				for ( int i = 0; i < nodesToFail.size(); i++ ) {
+					// Fail a node
+					log->LOG(&mp2[nodesToFail.at(i)]->getMemberNode()->addr, "Node failed at time=%d", par->getcurrtime());
+					mp2[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+					mp1[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+					cout<<endl<<"Failed a replica node"<<endl;
+				}
+			}
+			else {
+				// The code can never reach here
+				log->LOG(&mp2[number]->getMemberNode()->addr, "Could not fail two nodes");
+				//cout<<"COUNT: " <<count;
+				cout<<"Could not fail two nodes. Exiting!!!";
+				exit(1);
+			}
+
+			number = findARandomNodeThatIsAlive();
+
+			// Step 3.c Issue a read
+			cout<<endl<<"Reading a valid key.... ... .. . ."<<endl;
+			log->LOG(&mp2[number]->getMemberNode()->addr, "READ OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+			// This read should fail since at least quorum nodes are not alive
+			mp2[number]->clientRead(it->first);
+		}
+		/**
+		 * TEST 3 part 2: After failing two replicas and waiting for STABILIZE_TIME, issue a read
+		 */
+		// Step 3.d Wait for stabilization protocol to kick in
+		if ( par->getcurrtime() == (TEST_TIME + FIRST_FAIL_TIME + STABILIZE_TIME + STABILIZE_TIME) ) {
+			number = findARandomNodeThatIsAlive();
+			// Step 3.e Issue a read
+			cout<<endl<<"Reading a valid key.... ... .. . ."<<endl;
+			log->LOG(&mp2[number]->getMemberNode()->addr, "READ OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+			// This read should be successful
+			mp2[number]->clientRead(it->first);
+		}
+	}
+	/** end of test 3 **/
+
+	/**
+	 * Test 4: FAIL A NON-REPLICA. Test if value is read correctly in quorum number of nodes after a NON-REPLICA IS FAILED
+	 */
+	if ( par->getcurrtime() == (TEST_TIME + FIRST_FAIL_TIME + STABILIZE_TIME + STABILIZE_TIME + LAST_FAIL_TIME ) ) {
+		// Step 4.a. Find a node that is alive
+		number = findARandomNodeThatIsAlive();
+
+		// Step 4.b Find a non - replica for this key
+		replicas.clear();
+		replicas = mp2[number]->findNodes(it->first);
+		for ( int i = 0; i < par->EN_GPSZ; i++ ) {
+			if ( !mp2[i]->getMemberNode()->bFailed ) {
+				if ( mp2[i]->getMemberNode()->addr.getAddress() != replicas.at(PRIMARY).getAddress()->getAddress() &&
+					 mp2[i]->getMemberNode()->addr.getAddress() != replicas.at(SECONDARY).getAddress()->getAddress() &&
+					 mp2[i]->getMemberNode()->addr.getAddress() != replicas.at(TERTIARY).getAddress()->getAddress() ) {
+					// Step 4.c Fail a non-replica node
+					log->LOG(&mp2[i]->getMemberNode()->addr, "Node failed at time=%d", par->getcurrtime());
+					mp2[i]->getMemberNode()->bFailed = true;
+					mp1[i]->getMemberNode()->bFailed = true;
+					failedOneNode = true;
+					cout<<endl<<"Failed a non-replica node"<<endl;
+					break;
+				}
+			}
+		}
+		if ( !failedOneNode ) {
+			// The code can never reach here
+			log->LOG(&mp2[number]->getMemberNode()->addr, "Could not fail a node(non-replica)");
+			cout<<"Could not fail a node(non-replica). Exiting!!!";
+			exit(1);
+		}
+
+		number = findARandomNodeThatIsAlive();
+
+		// Step 4.d Issue a read operation
+		cout<<endl<<"Reading a valid key.... ... .. . ."<<endl;
+		log->LOG(&mp2[number]->getMemberNode()->addr, "READ OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+		// This read should fail since at least quorum nodes are not alive
+		mp2[number]->clientRead(it->first);
+	}
+
+	/** end of test 4 **/
+	/**
+	 * Test 5: Read a non-existent key.
+	 */
+	if ( par->getcurrtime() == (TEST_TIME + FIRST_FAIL_TIME + STABILIZE_TIME + STABILIZE_TIME + LAST_FAIL_TIME ) ) {
+		string invalidKey = "invalidKey";
+
+		// Step 5.a Find a node that is alive
+		number = findARandomNodeThatIsAlive();
+
+		// Step 5.b Issue a read operation
+		cout<<endl<<"Reading an invalid key.... ... .. . ."<<endl;
+		log->LOG(&mp2[number]->getMemberNode()->addr, "READ OPERATION KEY: %s at time: %d", invalidKey.c_str(), par->getcurrtime());
+		// This read should fail since at least quorum nodes are not alive
+		mp2[number]->clientRead(invalidKey);
+	}
+
+	/** end of test 5 **/
+
+}
+/**
+ * FUNCTION NAME: updateTest
+ *
+ * DECRIPTION: This tests the update API of the KV Store
+ */
+void Application::updateTest() {
+	// Step 0. Key to be updated
+	// This key is used for all update tests
+	map<string, string>::iterator it = testKVPairs.begin();
+	it++;
+	string newValue = "newValue";
+	int number;
+	vector<Node> replicas;
+	int replicaIdToFail = TERTIARY;
+	int nodeToFail;
+	bool failedOneNode = false;
+
+	/**
+	 * Test 1: Test if value is updated correctly in quorum number of nodes
+	 */
+	if ( par->getcurrtime() == TEST_TIME ) {
+		// Step 1.a. Find a node that is alive
+		number = findARandomNodeThatIsAlive();
+
+		// Step 1.b Do a update operation
+		cout<<endl<<"Updating a valid key.... ... .. . ."<<endl;
+		log->LOG(&mp2[number]->getMemberNode()->addr, "UPDATE OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), newValue.c_str(), par->getcurrtime());
+		mp2[number]->clientUpdate(it->first, newValue);
+	}
+
+	/** end of test 1 **/
+
+	/**
+	 * Test 2: FAIL ONE REPLICA. Test if value is updated correctly in quorum number of nodes after ONE OF THE REPLICAS IS FAILED
+	 */
+	if ( par->getcurrtime() == (TEST_TIME + FIRST_FAIL_TIME) ) {
+		// Step 2.a Find a node that is alive and assign it as number
+		number = findARandomNodeThatIsAlive();
+
+		// Step 2.b Find the replicas of this key
+		replicas.clear();
+		replicas = mp2[number]->findNodes(it->first);
+		// if quorum replicas are not found then exit
+		if ( replicas.size() < RF-1 ) {
+			log->LOG(&mp2[number]->getMemberNode()->addr, "Could not find at least quorum replicas for this key. Exiting!!! size of replicas vector: %d", replicas.size());
+			cout<<endl<<"Could not find at least quorum replicas for this key. Exiting!!! size of replicas vector: "<<replicas.size()<<endl;
+			exit(1);
+		}
+
+		// Step 2.c Fail a replica
+		for ( int i = 0; i < par->EN_GPSZ; i++ ) {
+			if ( mp2[i]->getMemberNode()->addr.getAddress() == replicas.at(replicaIdToFail).getAddress()->getAddress() ) {
+				if ( !mp2[i]->getMemberNode()->bFailed ) {
+					nodeToFail = i;
+					failedOneNode = true;
+					break;
+				}
+				else {
+					// Since we fail at most two nodes, one of the replicas must be alive
+					if ( replicaIdToFail > 0 ) {
+						replicaIdToFail--;
+					}
+					else {
+						failedOneNode = false;
+					}
+				}
+			}
+		}
+		if ( failedOneNode ) {
+			log->LOG(&mp2[nodeToFail]->getMemberNode()->addr, "Node failed at time=%d", par->getcurrtime());
+			mp2[nodeToFail]->getMemberNode()->bFailed = true;
+			mp1[nodeToFail]->getMemberNode()->bFailed = true;
+			cout<<endl<<"Failed a replica node"<<endl;
+		}
+		else {
+			// The code can never reach here
+			log->LOG(&mp2[number]->getMemberNode()->addr, "Could not fail a node");
+			cout<<"Could not fail a node. Exiting!!!";
+			exit(1);
+		}
+
+		number = findARandomNodeThatIsAlive();
+
+		// Step 2.d Issue a update
+		cout<<endl<<"Updating a valid key.... ... .. . ."<<endl;
+		log->LOG(&mp2[number]->getMemberNode()->addr, "UPDATE OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), newValue.c_str(), par->getcurrtime());
+		mp2[number]->clientUpdate(it->first, newValue);
+
+		failedOneNode = false;
+	}
+
+	/** end of test 2 **/
+	
 
