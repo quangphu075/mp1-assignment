@@ -215,3 +215,141 @@ Address Application::getjoinaddr(void){
     //trace.funcExit("Application::getjoinaddr", SUCCESS);
     return joinaddr;
 }
+int Application::findARandomNodeThatIsAlive() {
+	int number;
+	do {
+		number = (rand()%par->EN_GPSZ);
+	}while (mp2[number]->getMemberNode()->bFailed);
+	return number;
+}
+
+void Application::initTestKVPairs() {
+	srand(time(NULL));
+	int i;
+	string key;
+	key.clear();
+	testKVPairs.clear();
+	int alphanumLen = sizeof(alphanum) - 1;
+	while ( testKVPairs.size() != NUMBER_OF_INSERTS ) {
+		for ( i = 0; i < KEY_LENGTH; i++ ) {
+			key.push_back(alphanum[rand()%alphanumLen]);
+		}
+		string value = "value" + to_string(rand()%NUMBER_OF_INSERTS);
+		testKVPairs[key] = value;
+		key.clear();
+	}
+}
+void Application::insertTestKVPairs() {
+	int number = 0;
+
+	/*
+	 * Init a few test key value pairs
+	 */
+	initTestKVPairs();
+
+	for ( map<string, string>::iterator it = testKVPairs.begin(); it != testKVPairs.end(); ++it ) {
+		// Step 1. Find a node that is alive
+		number = findARandomNodeThatIsAlive();
+
+		// Step 2. Issue a create operation
+		log->LOG(&mp2[number]->getMemberNode()->addr, "CREATE OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+		mp2[number]->clientCreate(it->first, it->second);
+	}
+
+	cout<<endl<<"Sent " <<testKVPairs.size() <<" create messages to the ring"<<endl;
+}
+void Application::deleteTest() {
+	int number;
+	
+	cout<<endl<<"Deleting "<<testKVPairs.size()/2 <<" valid keys.... ... .. . ."<<endl;
+	map<string, string>::iterator it = testKVPairs.begin();
+	for ( int i = 0; i < testKVPairs.size()/2; i++ ) {
+		it++;
+
+		// Step 1.a. Find a node that is alive
+		number = findARandomNodeThatIsAlive();
+
+		// Step 1.b. Issue a delete operation
+		log->LOG(&mp2[number]->getMemberNode()->addr, "DELETE OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+		mp2[number]->clientDelete(it->first);
+	}
+	
+
+void Application::readTest() {
+
+	
+	map<string, string>::iterator it = testKVPairs.begin();
+	int number;
+	vector<Node> replicas;
+	int replicaIdToFail = TERTIARY;
+	int nodeToFail;
+	bool failedOneNode = false;
+
+	
+	if ( par->getcurrtime() == TEST_TIME ) {
+		// Step 1.a. Find a node that is alive
+		number = findARandomNodeThatIsAlive();
+
+		// Step 1.b Do a read operation
+		cout<<endl<<"Reading a valid key.... ... .. . ."<<endl;
+		log->LOG(&mp2[number]->getMemberNode()->addr, "READ OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+		mp2[number]->clientRead(it->first);
+	}
+	if ( par->getcurrtime() == (TEST_TIME + FIRST_FAIL_TIME) ) {
+		// Step 2.a Find a node that is alive and assign it as number
+		number = findARandomNodeThatIsAlive();
+
+		// Step 2.b Find the replicas of this key
+		replicas.clear();
+		replicas = mp2[number]->findNodes(it->first);
+		// if less than quorum replicas are found then exit
+		if ( replicas.size() < (RF-1) ) {
+			cout<<endl<<"Could not find at least quorum replicas for this key. Exiting!!! size of replicas vector: "<<replicas.size()<<endl;
+			log->LOG(&mp2[number]->getMemberNode()->addr, "Could not find at least quorum replicas for this key. Exiting!!! size of replicas vector: %d", replicas.size());
+			exit(1);
+		}
+
+		// Step 2.c Fail a replica
+		for ( int i = 0; i < par->EN_GPSZ; i++ ) {
+			if ( mp2[i]->getMemberNode()->addr.getAddress() == replicas.at(replicaIdToFail).getAddress()->getAddress() ) {
+				if ( !mp2[i]->getMemberNode()->bFailed ) {
+					nodeToFail = i;
+					failedOneNode = true;
+					break;
+				}
+				else {
+					// Since we fail at most two nodes, one of the replicas must be alive
+					if ( replicaIdToFail > 0 ) {
+						replicaIdToFail--;
+					}
+					else {
+						failedOneNode = false;
+					}
+				}
+			}
+		}
+		if ( failedOneNode ) {
+			log->LOG(&mp2[nodeToFail]->getMemberNode()->addr, "Node failed at time=%d", par->getcurrtime());
+			mp2[nodeToFail]->getMemberNode()->bFailed = true;
+			mp1[nodeToFail]->getMemberNode()->bFailed = true;
+			cout<<endl<<"Failed a replica node"<<endl;
+		}
+		else {
+			// The code can never reach here
+			log->LOG(&mp2[number]->getMemberNode()->addr, "Could not fail a node");
+			cout<<"Could not fail a node. Exiting!!!";
+			exit(1);
+		}
+
+		number = findARandomNodeThatIsAlive();
+
+		// Step 2.d Issue a read
+		cout<<endl<<"Reading a valid key.... ... .. . ."<<endl;
+		log->LOG(&mp2[number]->getMemberNode()->addr, "READ OPERATION KEY: %s VALUE: %s at time: %d", it->first.c_str(), it->second.c_str(), par->getcurrtime());
+		mp2[number]->clientRead(it->first);
+
+		failedOneNode = false;
+	}
+	
+	/** end of test 2 **/
+
